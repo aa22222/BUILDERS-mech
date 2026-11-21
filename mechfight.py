@@ -532,6 +532,7 @@ def run(make_bot: Any) -> None:
                     bot = make_bot(msg)
                 except Exception:
                     log(traceback.format_exc())
+                    raise SystemExit(1)  # Never report ready with an uninitialized bot.
                 name = getattr(bot, "name", None) or getattr(make_bot, "__name__", "bot")
                 _send({"type": "ready", "name": str(name)[:32]})
             elif kind == "obs":

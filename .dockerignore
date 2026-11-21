@@ -1,3 +1,9 @@
 .git
 __pycache__
 *.pyc
+arena
+simulator
+check
+*.md
+mechfight.schema.json
+evaluation
