@@ -205,6 +205,48 @@ class HunterTests(unittest.TestCase):
         self.assertNotEqual(self.bot.active_target,101)
         self.assertIn(('HUNT',101),self.bot.ignored_until)
 
+    def test_returns_fire_on_equal_pursuer_while_retreating(self):
+        enemy=self.actor(hp=1400)
+        self.obs['self']['hp']=1200
+        self.obs['mechs']=[enemy]
+        self.obs['events']=[dict(type='damaged',amount=45,weapon='gun',bearing=0,by=enemy['id'])]
+        self.assertFalse(self.bot.weaker(self.obs['self'],enemy))
+        with self.nav_stub() as nav:
+            for _ in range(4):
+                action=self.bot.act(self.obs)
+                self.obs['self']['aim']=action['aim']
+        self.assertEqual(self.bot.mode,'DEFEND')
+        self.assertIsNone(self.bot.mission_goal)
+        self.assertTrue(action['fire'][0])
+        self.assertEqual(nav.call_args.args[0]['mechs'][0]['id'],enemy['id'])
+
+    def test_does_not_provoke_stronger_opponents(self):
+        enemy=self.actor(hp=2500,cubes=15)
+        self.obs['self']['hp']=1200
+        self.obs['mechs']=[enemy]
+        with self.nav_stub():action=self.bot.act(self.obs)
+        self.assertIsNone(self.bot.active_target)
+        self.assertEqual(action['fire'],[False,False])
+
+    def test_defensive_fire_expires_when_attack_stops(self):
+        enemy=self.actor(hp=2500,cubes=15)
+        self.obs['mechs']=[enemy]
+        self.obs['events']=[dict(type='damaged',amount=45,weapon='gun',bearing=0,by=enemy['id'])]
+        with self.nav_stub():self.bot.act(self.obs)
+        self.assertEqual(self.bot.mode,'DEFEND')
+        self.obs['t']+=3.1;self.obs['events']=[]
+        with self.nav_stub():action=self.bot.act(self.obs)
+        self.assertNotIn('DEFEND',self.bot.mode)
+        self.assertEqual(action['fire'],[False,False])
+
+    def test_zone_escape_still_overrides_pursuit(self):
+        enemy=self.actor(hp=1400)
+        self.obs['mechs']=[enemy];self.obs['self']['in_zone']=False
+        self.obs['events']=[dict(type='damaged',amount=45,weapon='gun',bearing=0,by=enemy['id'])]
+        with self.nav_stub():self.bot.act(self.obs)
+        self.assertEqual(self.bot.mode,'ZONE/DEFEND')
+        self.assertIsNone(self.bot.mission_goal)
+
     def test_scan_when_no_targets(self):
         with self.nav_stub(): action=self.bot.act(self.obs)
         self.assertEqual(action['fire'],[False,False])

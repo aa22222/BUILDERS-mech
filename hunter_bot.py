@@ -40,6 +40,7 @@ class Bot(Navigator):
         self.active_target = None
         self.last_victim = None
         self.actor_memory = {}
+        self.recent_attackers = {}
         self.loot_interest = None
         self.cube_memory = {}
         self.ignored_until = {}
@@ -300,7 +301,19 @@ class Bot(Navigator):
         for actor in obs["mechs"] + [dict(c, kind="crate") for c in obs["crates"]]:
             if actor.get("hp", 1) > 0:
                 self.actor_memory[actor["id"]] = (dict(actor), now)
+        self.recent_attackers = {i: until for i, until in self.recent_attackers.items() if until > now and i not in kills}
+        for event in obs["events"]:
+            if event["type"] == "damaged" and event.get("by") is not None and event.get("weapon") != "zone":
+                self.recent_attackers[event["by"]] = now + 3.0
         mode, key, goal, target = self.choose(obs)
+        pursuers = [e for e in obs["mechs"] if e["id"] in self.recent_attackers and e.get("hp", 1) > 0]
+        attacker = min(pursuers, key=lambda e: math.dist(me["pos"], e["pos"])) if pursuers else None
+        defensive = attacker is not None and (target is None or target["id"] != attacker["id"])
+        if defensive:
+            # Fight back without treating a stronger pursuer as prey. Keeping it
+            # in the navigation observation preserves retreat/cover behavior.
+            mode = mode + "/DEFEND" if mode in ("ZONE", "RECOVER") else "DEFEND"
+            key, goal, target = None, None, dict(attacker)
         if key is not None and self.watch and self.watch[0] == key:
             _, pos, since, hp = self.watch
             damaging = target is not None and hp is not None and target.get("hp", hp) < hp - 1
@@ -315,7 +328,7 @@ class Bot(Navigator):
         self.mode, self.mission_key, self.mission_goal = mode, key, goal
         self.active_target = target["id"] if target else None
         nav_obs = dict(obs)
-        if target:
+        if target and not defensive:
             # Approach our chosen prey; still avoid every other known actor.
             nav_obs["mechs"] = [e for e in obs["mechs"] if e["id"] != target["id"]]
             self.memory.pop(target["id"], None)
