@@ -1,3 +1,5 @@
+> Legacy passive-navigation simulator. Do not use it to measure the current hunter: its own gunfire/cube farming and the practice squad are not simulated.
+
 # Approximate local simulator
 
 Run from the kit root (Python standard library only):

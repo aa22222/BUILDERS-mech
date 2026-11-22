@@ -1,3 +1,5 @@
+> Historical results for the previous passive bot. These do not validate the deployed cube hunter. The legacy simulator does not model hunter attacks, loot progression, or the coordinated practice opponents.
+
 # Regression results
 
 These are approximate simulations, not results from the competition server.

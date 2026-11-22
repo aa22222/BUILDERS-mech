@@ -1,34 +1,48 @@
-# Quiet Border
+# Cube Hunter
 
-Passive Mechfight bot: avoid opponents, seek solid cover, and stay inside the shrinking safe circle. It never fires. Local steering predicts one second of movement; an incremental A* planner supplies longer routes around buildings.
+The Docker entrypoint is `hunter_bot.py`. It follows the mechfight wrapper/example structure and uses `avoid_bot.py` only as its map-aware navigation and hiding component.
 
-The runtime reads the map mounted by the match server, follows live position and zone observations, accounts for rooftop height, and checks both destination and midpoint exposure. Boosting uses separate start/stop energy thresholds to allow regeneration. Torso scans complete a full sweep rather than repeatedly resetting toward nearby threats. Navigation clearance updates when mech size changes.
+## Strategy
 
-## Build and check
+1. Below 10 cubes, collect safe loose cubes, destroy crates, fight drones, and hunt weaker mechs. Explore when nothing suitable is visible.
+2. At 10 cubes, switch to hiding. Stop seeking crates and distant farming targets.
+3. Attack a nearby weaker opponent when the fight looks favorable, collect its dropped cubes, then return to hiding. Nearby drones can also be opportunistic targets.
+4. Zone escape and health recovery override farming or fighting. Recover below 50% HP and resume hunting after reaching 85% HP.
 
-```sh
-docker build --platform linux/amd64 -t quiet-border .
-python check/check.py -- python -u avoid_bot.py
-```
+"Weaker" means our estimated health-times-sustained-damage advantage is at least 1.5x. This accounts for current HP, known weapons, armor on our mech, and cube damage scaling. Enemy upgrades are not fully visible, so this is a conservative estimate, not a guarantee. Missing enemy HP means we do not initiate that fight. Nearby supporting mechs can veto an attack.
 
-To avoid the Windows checker's `/arena` path conversion, run the checker inside the Linux container. This also works on Linux:
+The bot leads gun shots, waits for the actual torso aim to align, checks geometry before firing, and reloads. It keeps the starter gun and can take a nearby lightning weapon into an empty slot. It does not deliberately acquire lasers or mortars. Cubes are collected automatically by walking into pickup range; their vertical pickup limit is respected. Delayed kills and loot locations are remembered briefly.
 
-```sh
-docker run --rm --platform linux/amd64 --network none --cpus 1 --memory 512m --read-only --tmpfs /tmp:rw,size=64m --user 65534:65534 -v "${PWD}/arena:/arena:ro" -v "${PWD}/check:/check:ro" -v "${PWD}/mechfight.schema.json:/mechfight.schema.json:ro" --entrypoint python3 quiet-border /check/check.py --map-dir /arena -- python3 -u /bot/avoid_bot.py
-```
+Debug drawings show FARM, HUNT, LOOT, EXPLORE, HIDE, AMBUSH, RECOVER, or ZONE, plus cube count, HP, target, navigation goal, and aim line. The protocol says these drawings are private and may not be displayed on the competition page.
 
-The Docker image copies only `avoid_bot.py` and `mechfight.py`. The map and simulator in this repository are local development fixtures, not bundled runtime map assets. The Python base image is pinned by digest, and no additional packages are needed.
-
-## Reproduce the simulation checks
+## Build and verify
 
 ```sh
-python -m unittest discover -s simulator -p "test_*.py"
-python simulator/run_suite.py --label candidate --seeds 1 2 3 4 5 --include-roof --workers 3
-python simulator/run_suite.py --bot simulator/baseline_bot.py --label baseline --seeds 1 2 3
-python simulator/stress_bot.py
-python simulator/render_trace.py simulator/results/candidate/random-1/trace.jsonl
+docker build --platform linux/amd64 -t cube-hunter .
+python check/check.py -- python -u hunter_bot.py
+python -m unittest discover -s tests -p "test_*.py"
+python tests/stress_hunter.py
 ```
 
-See [simulator/README.md](simulator/README.md) for assumptions and outputs. Simulation is diagnostic, not a recreation of the authoritative game engine. Surviving a timed scenario is not a match win. There is no guarantee of avoiding all opponents, all damage, or the final zero-radius zone. The bot cannot locate opponents the server has never revealed, and ground-route planning does not actively jet over otherwise impassable buildings.
+Run the checker inside Linux to avoid Windows converting `/arena` to a Windows path:
 
-Recorded validation and simulation outcomes: [REGRESSION_RESULTS.md](REGRESSION_RESULTS.md).
+```sh
+docker run --rm --platform linux/amd64 --network none --cpus 1 --memory 512m --read-only --tmpfs /tmp:rw,size=64m --user 65534:65534 -v "${PWD}/arena:/arena:ro" -v "${PWD}/check:/check:ro" -v "${PWD}/mechfight.schema.json:/mechfight.schema.json:ro" --entrypoint python3 cube-hunter /check/check.py --map-dir /arena -- python3 -u /bot/hunter_bot.py
+```
+
+The Python base image is pinned; no extra dependencies are required. Runtime map files come from the server mount. The repository's arena files are development fixtures.
+
+## Evidence and limitations
+
+The tests cover the 10-cube transition, favorable/unfavorable fights, supporting opponents, recovery, zone priority, aiming, reloads, cube priority, delayed kills, and returning to hiding after loot collection. A controlled policy test kills five stationary drones and collects ten cubes. It is not a realistic match: it uses flat movement, ideal registered hits, and no enemy attacks.
+
+The older simulator and `REGRESSION_RESULTS.md` are historical passive-bot artifacts. They do not validate this hunter. In particular, practice uses 15 house bots sharing vision and never fighting each other, as documented in `instructions.md`; the old free-for-all simulator did not model that. Passing checks does not establish a practice win rate. Navigation still uses approximate geometry and ground routes rather than general jet-based rooftop access.
+
+## Current validation
+
+- 16 policy/combat tests passed inside the restricted Linux/AMD64 Docker container.
+- Official conformance fixture: 300/300 responses on time; maximum 31.8 ms; 300 debug drawings within caps.
+- Crowded synthetic observations (27 actors, 36 crates, 60 loose cubes): 50/50 decisions within budget; maximum 38.8 ms.
+- No real practice match score has been measured for this hunter yet.
+
+The live rule defaults cap the basic cube HP/damage bonuses at 10 cubes. Further cubes still grow the mech and can unlock additional upgrade offers; this bot continues collecting them after opportunistic kills as requested.
